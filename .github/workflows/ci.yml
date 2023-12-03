@@ -20,6 +20,7 @@ jobs:
             testDockerCompose: true
     runs-on: ${{ matrix.os }}
     steps:
+
       - name: Checkout repository
         uses: actions/checkout@v3
         with:
@@ -33,7 +34,7 @@ jobs:
       - name: Check
         run: go run . check
         working-directory: ./internal/cmd/build
-
+      
       - name: Unit test
         run: go run . unit-test -coverage=${{ matrix.uploadCoverage && 'true' || 'false' }}
         working-directory: ./internal/cmd/build
