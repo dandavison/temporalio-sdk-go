@@ -266,7 +266,7 @@ func TestRemoteDataConverter(t *testing.T) {
 
 	remoteConverter := converter.NewRemoteDataConverter(
 		defaultConv,
-		converter.RemoteDataConverterOptions{Endpoint: server.URL},
+		converter.RemoteDataConverterOptions{converter.RemotePayloadCodecOptions{Endpoint: server.URL}},
 	)
 
 	unencodedPayloads, err := defaultConv.ToPayloads("test", "payloads")
