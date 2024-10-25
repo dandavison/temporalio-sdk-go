@@ -1061,7 +1061,7 @@ func DialCloudOperationsClient(ctx context.Context, options CloudOperationsClien
 func NewUpdateWithStartWorkflowOperation(options UpdateWorkflowOptions) *UpdateWithStartWorkflowOperation {
 	res := &UpdateWithStartWorkflowOperation{doneCh: make(chan struct{})}
 
-	input, err := createUpdateWorkflowInput(options)
+	input, err := createUpdateWorkflowInput(options, nil)
 	if err != nil {
 		res.set(nil, err)
 	} else if options.RunID != "" {

@@ -803,6 +803,19 @@ type UpdateWorkflowOptions struct {
 	// then the server will reject the update request with an error.
 	// Note that it is incompatible with UpdateWithStartWorkflowOperation.
 	FirstExecutionRunID string
+
+	// StartWorkflow is a workflow to be started when sending the update. Use
+	// WorkflowIDConflictPolicy in StartWorkflowOptions to control the behavior when
+	// a *running* workflow with the same id exists.
+	StartWorkflow any
+
+	// StartWorkflowArgs are arguments to be passed to the workflow specified by StartWorkflow.
+	// Ignored if StartWorkflow is not set.
+	StartWorkflowArgs []any
+
+	// StartWorkflowOptions are options for starting the workflow specified by StartWorkflow.
+	// Ignored if StartWorkflow is not set.
+	StartWorkflowOptions *StartWorkflowOptions
 }
 
 // WorkflowUpdateHandle is a handle to a workflow execution update process. The
@@ -1170,7 +1183,7 @@ func (wc *WorkflowClient) UpdateWorkflow(
 		return nil, err
 	}
 
-	in, err := createUpdateWorkflowInput(options)
+	in, err := createUpdateWorkflowInput(options, wc.registry)
 	if err != nil {
 		return nil, err
 	}
@@ -2043,6 +2056,36 @@ func (w *workflowClientInterceptor) UpdateWorkflow(
 	ctx context.Context,
 	in *ClientUpdateWorkflowInput,
 ) (WorkflowUpdateHandle, error) {
+	if in.StartWorkflowInput != nil {
+		if in.RunID != "" {
+			return nil, errors.New("RunID and StartWorkflowInput cannot both be set")
+		}
+		if in.FirstExecutionRunID != "" {
+			return nil, errors.New("FirstExecutionRunID and StartWorkflowInput cannot both be set")
+		}
+		startRequest, err := w.createStartWorkflowRequest(ctx, in.StartWorkflowInput)
+		if err != nil {
+			return nil, err
+		}
+		grpcCtx, cancel := newGRPCContext(
+			ctx,
+			grpcMetricsHandler(w.client.metricsHandler.WithTags(
+				metrics.RPCTags(in.StartWorkflowInput.WorkflowType, metrics.NoneTagValue, in.StartWorkflowInput.Options.TaskQueue))),
+			defaultGrpcRetryParameters(ctx))
+		defer cancel()
+
+		updateOp := &UpdateWithStartWorkflowOperation{doneCh: make(chan struct{}), input: in}
+		_, err = w.executeWorkflowWithOperation(grpcCtx, startRequest, updateOp)
+		// TODO: please give feedback: we are currently discarding the start workflow response
+		// here. If the UpdateWorkflow call succeeds, then the UpdateHandle contains the RunID.
+		// Otherwise, the user will have to use the Workflow ID to discover whether a workflow was
+		// started.
+		if err != nil {
+			return nil, err
+		}
+		return updateOp.Get(grpcCtx)
+	}
+
 	var resp *workflowservice.UpdateWorkflowExecutionResponse
 	req, err := w.createUpdateWorkflowRequest(ctx, in)
 	if err != nil {
@@ -2085,6 +2128,7 @@ func (w *workflowClientInterceptor) updateIsDurable(resp *workflowservice.Update
 
 func createUpdateWorkflowInput(
 	options UpdateWorkflowOptions,
+	registry *registry,
 ) (*ClientUpdateWorkflowInput, error) {
 	// Default update ID
 	updateID := options.UpdateID
@@ -2100,6 +2144,19 @@ func createUpdateWorkflowInput(
 		return nil, errors.New("WaitForStage WorkflowUpdateStageAdmitted is not supported")
 	}
 
+	var startWorkflowInput *ClientExecuteWorkflowInput
+	if options.StartWorkflow != "" {
+		workflowType, err := getWorkflowFunctionName(registry, options.StartWorkflow)
+		if err != nil {
+			return nil, err
+		}
+		startWorkflowInput = &ClientExecuteWorkflowInput{
+			Options:      options.StartWorkflowOptions,
+			WorkflowType: workflowType,
+			Args:         options.StartWorkflowArgs,
+		}
+	}
+
 	return &ClientUpdateWorkflowInput{
 		UpdateID:            updateID,
 		WorkflowID:          options.WorkflowID,
@@ -2108,6 +2165,7 @@ func createUpdateWorkflowInput(
 		RunID:               options.RunID,
 		FirstExecutionRunID: options.FirstExecutionRunID,
 		WaitForStage:        options.WaitForStage,
+		StartWorkflowInput:  startWorkflowInput,
 	}, nil
 }
 

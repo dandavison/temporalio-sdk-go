@@ -414,6 +414,7 @@ type ClientUpdateWorkflowInput struct {
 	RunID               string
 	FirstExecutionRunID string
 	WaitForStage        WorkflowUpdateStage
+	StartWorkflowInput  *ClientExecuteWorkflowInput
 }
 
 // ClientPollWorkflowUpdateInput is the input to
