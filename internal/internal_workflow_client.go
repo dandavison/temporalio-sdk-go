@@ -237,29 +237,16 @@ func (wc *WorkflowClient) ExecuteWorkflow(ctx context.Context, options StartWork
 		return nil, err
 	}
 
-	// Default workflow ID
-	if options.ID == "" {
-		options.ID = uuid.New()
-	}
+	// Set header before interceptor run
+	ctx = contextWithNewHeader(ctx)
 
-	// Validate function and get name
-	if err := validateFunctionArgs(workflow, args, true); err != nil {
-		return nil, err
-	}
-	workflowType, err := getWorkflowFunctionName(wc.registry, workflow)
+	in, err := createStartWorkflowInput(options, workflow, args, wc.registry)
 	if err != nil {
 		return nil, err
 	}
 
-	// Set header before interceptor run
-	ctx = contextWithNewHeader(ctx)
-
 	// Run via interceptor
-	return wc.interceptor.ExecuteWorkflow(ctx, &ClientExecuteWorkflowInput{
-		Options:      &options,
-		WorkflowType: workflowType,
-		Args:         args,
-	})
+	return wc.interceptor.ExecuteWorkflow(ctx, in)
 }
 
 // GetWorkflow gets a workflow execution and returns a WorkflowRun that will allow you to wait until this workflow
@@ -1193,6 +1180,25 @@ func (wc *WorkflowClient) UpdateWorkflow(
 	return wc.interceptor.UpdateWorkflow(ctx, in)
 }
 
+func (wc *WorkflowClient) UpdateWithStartWorkflow(
+	ctx context.Context,
+	updateOptions UpdateWorkflowOptions,
+	startOptions StartWorkflowOptions,
+) (WorkflowUpdateHandle, error) {
+	if err := wc.ensureInitialized(ctx); err != nil {
+		return nil, err
+	}
+
+	in, err := createUpdateWorkflowInput(updateOptions, wc.registry)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx = contextWithNewHeader(ctx)
+
+	return wc.interceptor.UpdateWithStartWorkflow(ctx, in)
+}
+
 // CheckHealthRequest is a request for Client.CheckHealth.
 type CheckHealthRequest struct{}
 
@@ -1611,6 +1617,29 @@ func (w *workflowClientInterceptor) ExecuteWorkflow(
 		dataConverter:    w.client.dataConverter,
 		failureConverter: w.client.failureConverter,
 		registry:         w.client.registry,
+	}, nil
+}
+
+func createStartWorkflowInput(
+	options StartWorkflowOptions,
+	workflow interface{},
+	args []interface{},
+	registry *registry,
+) (*ClientExecuteWorkflowInput, error) {
+	if options.ID == "" {
+		options.ID = uuid.New()
+	}
+	if err := validateFunctionArgs(workflow, args, true); err != nil {
+		return nil, err
+	}
+	workflowType, err := getWorkflowFunctionName(registry, workflow)
+	if err != nil {
+		return nil, err
+	}
+	return &ClientExecuteWorkflowInput{
+		Options:      &options,
+		WorkflowType: workflowType,
+		Args:         args,
 	}, nil
 }
 
