@@ -1547,6 +1547,73 @@ type workflowClientInterceptor struct {
 	client *WorkflowClient
 }
 
+func (w *workflowClientInterceptor) ExecuteWorkflow(
+	ctx context.Context,
+	in *ClientExecuteWorkflowInput,
+) (WorkflowRun, error) {
+	startRequest, err := w.createStartWorkflowRequest(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	workflowID := startRequest.WorkflowId
+
+	var eagerExecutor *eagerWorkflowExecutor
+	if in.Options.EnableEagerStart && w.client.capabilities.GetEagerWorkflowStart() && w.client.eagerDispatcher != nil {
+		eagerExecutor = w.client.eagerDispatcher.applyToRequest(startRequest)
+	}
+
+	grpcCtx, cancel := newGRPCContext(ctx, grpcMetricsHandler(
+		w.client.metricsHandler.WithTags(metrics.RPCTags(in.WorkflowType, metrics.NoneTagValue, in.Options.TaskQueue))),
+		defaultGrpcRetryParameters(ctx))
+	defer cancel()
+
+	var runID string
+	if in.Options.WithStartOperation == nil {
+		response, err := w.client.workflowService.StartWorkflowExecution(grpcCtx, startRequest)
+
+		eagerWorkflowTask := response.GetEagerWorkflowTask()
+		if eagerWorkflowTask != nil && eagerExecutor != nil {
+			eagerExecutor.handleResponse(eagerWorkflowTask)
+		} else if eagerExecutor != nil {
+			eagerExecutor.releaseUnused()
+		}
+
+		// Allow already-started error
+		if e, ok := err.(*serviceerror.WorkflowExecutionAlreadyStarted); ok && !in.Options.WorkflowExecutionErrorWhenAlreadyStarted {
+			runID = e.RunId
+		} else if err != nil {
+			return nil, err
+		} else {
+			runID = response.RunId
+		}
+	} else {
+		response, err := w.executeWorkflowWithOperation(grpcCtx, startRequest, in.Options.WithStartOperation)
+		if err != nil {
+			return nil, err
+		}
+		runID = response.RunId
+	}
+
+	iterFn := func(fnCtx context.Context, fnRunID string) HistoryEventIterator {
+		metricsHandler := w.client.metricsHandler.WithTags(metrics.RPCTags(in.WorkflowType,
+			metrics.NoneTagValue, in.Options.TaskQueue))
+		return w.client.getWorkflowHistory(fnCtx, workflowID, fnRunID, true,
+			enumspb.HISTORY_EVENT_FILTER_TYPE_CLOSE_EVENT, metricsHandler)
+	}
+
+	curRunIDCell := util.PopulatedOnceCell(runID)
+	return &workflowRunImpl{
+		workflowType:     in.WorkflowType,
+		workflowID:       workflowID,
+		firstRunID:       runID,
+		currentRunID:     &curRunIDCell,
+		iterFn:           iterFn,
+		dataConverter:    w.client.dataConverter,
+		failureConverter: w.client.failureConverter,
+		registry:         w.client.registry,
+	}, nil
+}
+
 func (w *workflowClientInterceptor) createStartWorkflowRequest(
 	ctx context.Context,
 	in *ClientExecuteWorkflowInput,
@@ -1626,73 +1693,6 @@ func (w *workflowClientInterceptor) createStartWorkflowRequest(
 	}
 
 	return startRequest, nil
-}
-
-func (w *workflowClientInterceptor) ExecuteWorkflow(
-	ctx context.Context,
-	in *ClientExecuteWorkflowInput,
-) (WorkflowRun, error) {
-	startRequest, err := w.createStartWorkflowRequest(ctx, in)
-	if err != nil {
-		return nil, err
-	}
-	workflowID := startRequest.WorkflowId
-
-	var eagerExecutor *eagerWorkflowExecutor
-	if in.Options.EnableEagerStart && w.client.capabilities.GetEagerWorkflowStart() && w.client.eagerDispatcher != nil {
-		eagerExecutor = w.client.eagerDispatcher.applyToRequest(startRequest)
-	}
-
-	grpcCtx, cancel := newGRPCContext(ctx, grpcMetricsHandler(
-		w.client.metricsHandler.WithTags(metrics.RPCTags(in.WorkflowType, metrics.NoneTagValue, in.Options.TaskQueue))),
-		defaultGrpcRetryParameters(ctx))
-	defer cancel()
-
-	var runID string
-	if in.Options.WithStartOperation == nil {
-		response, err := w.client.workflowService.StartWorkflowExecution(grpcCtx, startRequest)
-
-		eagerWorkflowTask := response.GetEagerWorkflowTask()
-		if eagerWorkflowTask != nil && eagerExecutor != nil {
-			eagerExecutor.handleResponse(eagerWorkflowTask)
-		} else if eagerExecutor != nil {
-			eagerExecutor.releaseUnused()
-		}
-
-		// Allow already-started error
-		if e, ok := err.(*serviceerror.WorkflowExecutionAlreadyStarted); ok && !in.Options.WorkflowExecutionErrorWhenAlreadyStarted {
-			runID = e.RunId
-		} else if err != nil {
-			return nil, err
-		} else {
-			runID = response.RunId
-		}
-	} else {
-		response, err := w.executeWorkflowWithOperation(grpcCtx, startRequest, in.Options.WithStartOperation)
-		if err != nil {
-			return nil, err
-		}
-		runID = response.RunId
-	}
-
-	iterFn := func(fnCtx context.Context, fnRunID string) HistoryEventIterator {
-		metricsHandler := w.client.metricsHandler.WithTags(metrics.RPCTags(in.WorkflowType,
-			metrics.NoneTagValue, in.Options.TaskQueue))
-		return w.client.getWorkflowHistory(fnCtx, workflowID, fnRunID, true,
-			enumspb.HISTORY_EVENT_FILTER_TYPE_CLOSE_EVENT, metricsHandler)
-	}
-
-	curRunIDCell := util.PopulatedOnceCell(runID)
-	return &workflowRunImpl{
-		workflowType:     in.WorkflowType,
-		workflowID:       workflowID,
-		firstRunID:       runID,
-		currentRunID:     &curRunIDCell,
-		iterFn:           iterFn,
-		dataConverter:    w.client.dataConverter,
-		failureConverter: w.client.failureConverter,
-		registry:         w.client.registry,
-	}, nil
 }
 
 func (w *workflowClientInterceptor) executeWorkflowWithOperation(
