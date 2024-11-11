@@ -655,18 +655,6 @@ type (
 		// Optional: defaulted to Fail.
 		WorkflowIDConflictPolicy enumspb.WorkflowIdConflictPolicy
 
-		// WithStartOperation - Operation to execute with Workflow Start.
-		// For example, see NewUpdateWithStartWorkflowOperation to perform Update-with-Start. Note that if the workflow is
-		// already running and WorkflowIDConflictPolicy is set to UseExisting, the start is skipped and only the
-		// operation is executed. If instead the policy is set to Fail (the default), nothing is executed and
-		// an error will be returned (i.e. the option WorkflowExecutionErrorWhenAlreadyStarted is ignored).
-		// This option will be ignored when used with Client.SignalWithStartWorkflow.
-		//
-		// Optional: defaults to nil.
-		//
-		// NOTE: Experimental
-		WithStartOperation WithStartWorkflowOperation
-
 		// When WorkflowExecutionErrorWhenAlreadyStarted is true, Client.ExecuteWorkflow will return an error if the
 		// workflow id has already been used and WorkflowIDReusePolicy or WorkflowIDConflictPolicy would
 		// disallow a re-run. If it is set to false, rather than erroring a WorkflowRun instance representing
@@ -1079,11 +1067,12 @@ func DialCloudOperationsClient(ctx context.Context, options CloudOperationsClien
 	}, nil
 }
 
+// NewUpdateWithStartWorkflowOperation
 // NewUpdateWithStartWorkflowOperation returns an UpdateWithStartWorkflowOperation that can be used to perform Update-with-Start.
 func NewUpdateWithStartWorkflowOperation(options UpdateWorkflowOptions) *UpdateWithStartWorkflowOperation {
 	res := &UpdateWithStartWorkflowOperation{doneCh: make(chan struct{})}
 
-	input, err := createUpdateWorkflowInput(options, nil)
+	input, err := createUpdateWorkflowInput(options)
 	if err != nil {
 		res.set(nil, err)
 	} else if options.RunID != "" {
