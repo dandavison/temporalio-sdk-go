@@ -358,13 +358,15 @@ func (wc *WorkflowClient) SignalWithStartWorkflow(ctx context.Context, workflowI
 }
 
 func (wc *WorkflowClient) NewStartWorkflowOperation(options StartWorkflowOptions, workflow any, args ...interface{}) (*StartWorkflowOperation, error) {
+	res := &StartWorkflowOperation{doneCh: make(chan struct{})}
 	input, err := createStartWorkflowInput(options, workflow, args, wc.registry)
 	if err != nil {
-		return nil, err
+		res.set(nil, err)
+	} else {
+		res.input = input
 	}
-	return &StartWorkflowOperation{
-		input: input,
-	}, nil
+	// TODO NewUpdateWithStartWorkflowOperation sets input even if error
+	return res, nil
 }
 
 // CancelWorkflow cancels a workflow in execution.  It allows workflow to properly clean up and gracefully close.
@@ -1765,7 +1767,25 @@ func (w *workflowClientInterceptor) UpdateWithStartWorkflow(
 	if err != nil {
 		return nil, err
 	}
-	startOperation.runID = startResp.RunId
+
+	iterFn := func(fnCtx context.Context, fnRunID string) HistoryEventIterator {
+		metricsHandler := w.client.metricsHandler.WithTags(metrics.RPCTags(startOperation.input.WorkflowType,
+			metrics.NoneTagValue, startOperation.input.Options.TaskQueue))
+		return w.client.getWorkflowHistory(fnCtx, startOperation.input.Options.ID, fnRunID, true,
+			enumspb.HISTORY_EVENT_FILTER_TYPE_CLOSE_EVENT, metricsHandler)
+	}
+
+	runIDCell := util.PopulatedOnceCell(startResp.RunId)
+	startOperation.set(&workflowRunImpl{
+		workflowType:     startOperation.input.WorkflowType,
+		workflowID:       startOperation.input.Options.ID,
+		firstRunID:       startResp.RunId,
+		currentRunID:     &runIDCell,
+		iterFn:           iterFn,
+		dataConverter:    w.client.dataConverter,
+		failureConverter: w.client.failureConverter,
+		registry:         w.client.registry,
+	}, nil)
 	return updateOp.Get(grpcCtx)
 }
 

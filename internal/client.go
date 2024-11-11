@@ -762,8 +762,13 @@ type (
 	// NOTE: Experimental
 	StartWorkflowOperation struct {
 		input *ClientExecuteWorkflowInput
-		// TODO: prevent the StartWorkflowOperation from being reused
-		runID string
+		// flag to ensure the operation is only executed once
+		executed atomic.Bool
+		// channel to indicate that handle or err is available
+		doneCh chan struct{}
+		// workflowRun and err cannot be accessed before doneCh is closed
+		workflowRun WorkflowRun
+		err         error
 	}
 
 	// WithStartWorkflowOperation is a type of operation that can be executed as part of a workflow start.
@@ -1120,6 +1125,31 @@ func (op *UpdateWithStartWorkflowOperation) set(handle WorkflowUpdateHandle, err
 }
 
 func (op *UpdateWithStartWorkflowOperation) isWithStartWorkflowOperation() {}
+
+func (op *StartWorkflowOperation) Get(ctx context.Context) (WorkflowRun, error) {
+	select {
+	case <-op.doneCh:
+		return op.workflowRun, op.err
+	case <-ctx.Done():
+		if !op.executed.Load() {
+			return nil, fmt.Errorf("%w: %w", ctx.Err(), fmt.Errorf("operation was not executed"))
+		}
+		return nil, ctx.Err()
+	}
+}
+
+func (op *StartWorkflowOperation) markExecuted() error {
+	if op.executed.Swap(true) {
+		return fmt.Errorf("was already executed")
+	}
+	return nil
+}
+
+func (op *StartWorkflowOperation) set(workflowRun WorkflowRun, err error) {
+	op.workflowRun = workflowRun
+	op.err = err
+	close(op.doneCh)
+}
 
 // NewNamespaceClient creates an instance of a namespace client, to manager lifecycle of namespaces.
 func NewNamespaceClient(options ClientOptions) (NamespaceClient, error) {
