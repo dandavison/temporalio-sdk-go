@@ -135,6 +135,10 @@ type (
 		SignalWithStartWorkflow(ctx context.Context, workflowID string, signalName string, signalArg interface{},
 			options StartWorkflowOptions, workflow interface{}, workflowArgs ...interface{}) (WorkflowRun, error)
 
+		// NewStartWorkflowOperation returns a StartWorkflowOperation to perform Update-with-Start.
+		// NOTE: Experimental
+		NewStartWorkflowOperation(options StartWorkflowOptions, workflow any, args ...interface{}) (*StartWorkflowOperation, error)
+
 		// CancelWorkflow cancels a workflow in execution
 		// - workflow ID of the workflow.
 		// - runID can be default(empty string). if empty string then it will pick the running execution of that workflow ID.
@@ -393,6 +397,10 @@ type (
 		// directly from this function call.
 		// NOTE: Experimental
 		UpdateWorkflow(ctx context.Context, options UpdateWorkflowOptions) (WorkflowUpdateHandle, error)
+
+		// UpdateWithStartWorkflow issues an update request to the specified workflow execution, starting the workflow if appropriate.
+		// NOTE: Experimental
+		UpdateWithStartWorkflow(ctx context.Context, options UpdateWorkflowOptions, startOperation *StartWorkflowOperation) (WorkflowUpdateHandle, error)
 
 		// GetWorkflowUpdateHandle creates a handle to the referenced update
 		// which can be polled for an outcome. Note that runID is optional and
@@ -747,6 +755,15 @@ type (
 		callbacks []*commonpb.Callback
 		// links. Only settable by the SDK - e.g. [temporalnexus.workflowRunOperation].
 		links []*commonpb.Link
+	}
+
+	// StartWorkflowOperation is used to perform Start.
+	// See NewStartWorkflowOperation for details.
+	// NOTE: Experimental
+	StartWorkflowOperation struct {
+		input *ClientExecuteWorkflowInput
+		// TODO: prevent the StartWorkflowOperation from being reused
+		runID string
 	}
 
 	// WithStartWorkflowOperation is a type of operation that can be executed as part of a workflow start.

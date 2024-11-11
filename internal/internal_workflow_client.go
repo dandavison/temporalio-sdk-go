@@ -357,6 +357,16 @@ func (wc *WorkflowClient) SignalWithStartWorkflow(ctx context.Context, workflowI
 	})
 }
 
+func (wc *WorkflowClient) NewStartWorkflowOperation(options StartWorkflowOptions, workflow any, args ...interface{}) (*StartWorkflowOperation, error) {
+	input, err := createStartWorkflowInput(options, workflow, args, wc.registry)
+	if err != nil {
+		return nil, err
+	}
+	return &StartWorkflowOperation{
+		input: input,
+	}, nil
+}
+
 // CancelWorkflow cancels a workflow in execution.  It allows workflow to properly clean up and gracefully close.
 // workflowID is required, other parameters are optional.
 // If runID is omit, it will terminate currently running workflow (if there is one) based on the workflowID.
@@ -1183,20 +1193,20 @@ func (wc *WorkflowClient) UpdateWorkflow(
 func (wc *WorkflowClient) UpdateWithStartWorkflow(
 	ctx context.Context,
 	updateOptions UpdateWorkflowOptions,
-	startOptions StartWorkflowOptions,
+	startOperation *StartWorkflowOperation,
 ) (WorkflowUpdateHandle, error) {
 	if err := wc.ensureInitialized(ctx); err != nil {
 		return nil, err
 	}
 
-	in, err := createUpdateWorkflowInput(updateOptions, wc.registry)
+	updateInput, err := createUpdateWorkflowInput(updateOptions, wc.registry)
 	if err != nil {
 		return nil, err
 	}
 
 	ctx = contextWithNewHeader(ctx)
 
-	return wc.interceptor.UpdateWithStartWorkflow(ctx, in)
+	return wc.interceptor.UpdateWithStartWorkflow(ctx, updateInput, startOperation)
 }
 
 // CheckHealthRequest is a request for Client.CheckHealth.
@@ -1722,6 +1732,41 @@ func (w *workflowClientInterceptor) createStartWorkflowRequest(
 	}
 
 	return startRequest, nil
+}
+
+func (w *workflowClientInterceptor) UpdateWithStartWorkflow(
+	ctx context.Context,
+	updateInput *ClientUpdateWorkflowInput,
+	startOperation *StartWorkflowOperation,
+) (WorkflowUpdateHandle, error) {
+	// TODO: make conflict policy required
+	if updateInput.RunID != "" {
+		return nil, errors.New("RunID and StartWorkflowInput cannot both be set")
+	}
+	if updateInput.FirstExecutionRunID != "" {
+		return nil, errors.New("FirstExecutionRunID and StartWorkflowInput cannot both be set")
+	}
+	startRequest, err := w.createStartWorkflowRequest(ctx, startOperation.input)
+	if err != nil {
+		return nil, err
+	}
+	grpcCtx, cancel := newGRPCContext(
+		ctx,
+		grpcMetricsHandler(w.client.metricsHandler.WithTags(
+			metrics.RPCTags(startOperation.input.WorkflowType, metrics.NoneTagValue, startOperation.input.Options.TaskQueue))),
+		defaultGrpcRetryParameters(ctx))
+	defer cancel()
+
+	// TODO: Code is in transitional state; here we are reusing machinery from an earlier
+	// implementation of UWS. Everything should be tailored to the chosen implementation and all
+	// remnants of other implementations removed.
+	updateOp := &UpdateWithStartWorkflowOperation{doneCh: make(chan struct{}), input: updateInput}
+	startResp, err := w.executeWorkflowWithOperation(grpcCtx, startRequest, updateOp)
+	if err != nil {
+		return nil, err
+	}
+	startOperation.runID = startResp.RunId
+	return updateOp.Get(grpcCtx)
 }
 
 func (w *workflowClientInterceptor) executeWorkflowWithOperation(

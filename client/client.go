@@ -162,6 +162,11 @@ type (
 	// StartWorkflowOptions configuration parameters for starting a workflow execution.
 	StartWorkflowOptions = internal.StartWorkflowOptions
 
+	// StartWorkflowOperation is used to perform Start.
+	// See NewStartWorkflowOperation for details.
+	// NOTE: Experimental
+	StartWorkflowOperation = internal.StartWorkflowOperation
+
 	// WithStartWorkflowOperation is a type of operation that can be executed as part of a workflow start.
 	// For example, use NewUpdateWithStartWorkflowOperation to perform Update-with-Start.
 	// NOTE: Experimental
@@ -564,6 +569,10 @@ type (
 		SignalWithStartWorkflow(ctx context.Context, workflowID string, signalName string, signalArg interface{},
 			options StartWorkflowOptions, workflow interface{}, workflowArgs ...interface{}) (WorkflowRun, error)
 
+		// NewStartWorkflowOperation returns a StartWorkflowOperation to perform Update-with-Start.
+		// NOTE: Experimental
+		NewStartWorkflowOperation(options StartWorkflowOptions, workflow any, args ...interface{}) (*StartWorkflowOperation, error)
+
 		// CancelWorkflow request cancellation of a workflow in execution. Cancellation request closes the channel
 		// returned by the workflow.Context.Done() of the workflow that is target of the request.
 		// - workflow ID of the workflow.
@@ -839,6 +848,11 @@ type (
 		//  - WorkflowUpdateServiceTimeoutOrCanceledError
 		// NOTE: Experimental
 		UpdateWorkflow(ctx context.Context, options UpdateWorkflowOptions) (WorkflowUpdateHandle, error)
+
+		// UpdateWithStartWorkflow intercepts client.Client.UpdateWithStartWorkflow.
+		//
+		// NOTE: Experimental
+		UpdateWithStartWorkflow(ctx context.Context, options UpdateWorkflowOptions, startOperation *StartWorkflowOperation) (WorkflowUpdateHandle, error)
 
 		// GetWorkflowUpdateHandle creates a handle to the referenced update
 		// which can be polled for an outcome. Note that runID is optional and

@@ -48,6 +48,39 @@ type Client struct {
 	mock.Mock
 }
 
+// NewStartWorkflowOperation provides a mock function with given fields: options, workflow, args
+func (_m *Client) NewStartWorkflowOperation(options client.StartWorkflowOptions, workflow any, args ...interface{}) (*client.StartWorkflowOperation, error) {
+	var _ca []interface{}
+	_ca = append(_ca, options, workflow)
+	_ca = append(_ca, args...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for NewStartWorkflowOperation")
+	}
+
+	var r0 *client.StartWorkflowOperation
+	var r1 error
+	if rf, ok := ret.Get(0).(func(client.StartWorkflowOptions, any, ...interface{}) (*client.StartWorkflowOperation, error)); ok {
+		return rf(options, workflow, args...)
+	}
+	if rf, ok := ret.Get(0).(func(client.StartWorkflowOptions, any, ...interface{}) *client.StartWorkflowOperation); ok {
+		r0 = rf(options, workflow, args...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*client.StartWorkflowOperation)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(client.StartWorkflowOptions, any, ...interface{}) error); ok {
+		r1 = rf(options, workflow, args...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // CancelWorkflow provides a mock function with given fields: ctx, workflowID, runID
 func (_m *Client) CancelWorkflow(ctx context.Context, workflowID string, runID string) error {
 	ret := _m.Called(ctx, workflowID, runID)
@@ -952,6 +985,36 @@ func (_m *Client) UpdateWorkflow(ctx context.Context, options client.UpdateWorkf
 
 	if rf, ok := ret.Get(1).(func(context.Context, client.UpdateWorkflowOptions) error); ok {
 		r1 = rf(ctx, options)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// UpdateWithStartWorkflow provides a mock function with given fields: ctx, options, startOperation
+func (_m *Client) UpdateWithStartWorkflow(ctx context.Context, options client.UpdateWorkflowOptions, startOperation *client.StartWorkflowOperation) (client.WorkflowUpdateHandle, error) {
+	ret := _m.Called(ctx, options, startOperation)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateWithStartWorkflow")
+	}
+
+	var r0 client.WorkflowUpdateHandle
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, client.UpdateWorkflowOptions, *client.StartWorkflowOperation) (client.WorkflowUpdateHandle, error)); ok {
+		return rf(ctx, options, startOperation)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, client.UpdateWorkflowOptions, *client.StartWorkflowOperation) client.WorkflowUpdateHandle); ok {
+		r0 = rf(ctx, options, startOperation)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(client.WorkflowUpdateHandle)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, client.UpdateWorkflowOptions, *client.StartWorkflowOperation) error); ok {
+		r1 = rf(ctx, options, startOperation)
 	} else {
 		r1 = ret.Error(1)
 	}
