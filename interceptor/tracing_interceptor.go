@@ -389,7 +389,7 @@ func (t *tracingClientOutboundInterceptor) UpdateWithStartWorkflow(
 	}
 	// Start span and write to header
 	span, ctx, err := t.root.startSpanFromContext(ctx, &TracerStartSpanOptions{
-		Operation: "UpdateWithStartWorkflow",
+		Operation: "UpdateWithStartWorkflowxxx",
 		Name:      in.UpdateOptions.UpdateName,
 		Tags:      map[string]string{workflowIDTagKey: in.UpdateOptions.WorkflowID, updateIDTagKey: in.UpdateOptions.UpdateID},
 		ToHeader:  true,
