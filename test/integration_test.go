@@ -8916,3 +8916,43 @@ func (ts *IntegrationTestSuite) TestExecuteActivitySuite() {
 		activityResultChan <- "" // allow activity to complete
 	})
 }
+
+// TestPollActivityResultSurvivesLongWait verifies that handle.Get() can wait
+// longer than the internal gRPC per-RPC timeout (defaultRPCTimeout = 10s).
+// This fails because PollActivityResult creates a single gRPC context with a
+// 10s timeout for the entire polling loop, rather than a fresh context per
+// iteration as the update-poll loops do.
+func (ts *IntegrationTestSuite) TestPollActivityResultSurvivesLongWait() {
+	if os.Getenv("DISABLE_STANDALONE_ACTIVITY_TESTS") != "" {
+		ts.T().SkipNow()
+	}
+
+	activityDone := make(chan struct{})
+	slowActivity := func(ctx context.Context) (string, error) {
+		select {
+		case <-activityDone:
+			return "done", nil
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+	ts.worker.RegisterActivityWithOptions(slowActivity, activity.RegisterOptions{Name: "slowActivity"})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	handle, err := ts.client.ExecuteActivity(ctx, client.StartActivityOptions{
+		ID:                     uuid.NewString(),
+		TaskQueue:              ts.taskQueueName,
+		ScheduleToCloseTimeout: 60 * time.Second,
+	}, "slowActivity")
+	ts.NoError(err)
+
+	// Complete the activity after 15s — well beyond the 10s internal timeout.
+	time.AfterFunc(15*time.Second, func() { close(activityDone) })
+
+	var result string
+	err = handle.Get(ctx, &result)
+	ts.NoError(err, "handle.Get() should succeed; the 10s internal gRPC timeout should not kill the poll loop")
+	ts.Equal("done", result)
+}
