@@ -16,14 +16,14 @@ import (
 	"google.golang.org/grpc/metadata"
 )
 
+var defaultRPCTimeout = 10 * time.Second
+
 const (
 	clientNameHeaderName              = "client-name"
 	clientNameHeaderValue             = "temporal-go"
 	clientVersionHeaderName           = "client-version"
 	supportedServerVersionsHeaderName = "supported-server-versions"
 
-	// defaultRPCTimeout is the default gRPC call timeout.
-	defaultRPCTimeout = 10 * time.Second
 	// minRPCTimeout is minimum gRPC call timeout allowed.
 	minRPCTimeout = 1 * time.Second
 	// maxRPCTimeout is maximum gRPC call timeout allowed (should not be less than defaultRPCTimeout).

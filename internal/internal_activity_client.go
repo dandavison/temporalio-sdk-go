@@ -17,6 +17,8 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
+var pollActivityTimeout = 60 * time.Second
+
 type (
 	// ClientStartActivityOptions contains configuration parameters for starting an activity execution.
 	// ID and TaskQueue are required. At least one of ScheduleToCloseTimeout or StartToCloseTimeout is required.
