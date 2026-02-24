@@ -643,9 +643,6 @@ func (w *workflowClientInterceptor) PollActivityResult(
 	ctx context.Context,
 	in *ClientPollActivityResultInput,
 ) (*ClientPollActivityResultOutput, error) {
-	grpcCtx, cancel := newGRPCContext(ctx, defaultGrpcRetryParameters(ctx), grpcLongPoll(true))
-	defer cancel()
-
 	request := &workflowservice.PollActivityExecutionRequest{
 		Namespace:  w.client.namespace,
 		ActivityId: in.ActivityID,
@@ -654,8 +651,10 @@ func (w *workflowClientInterceptor) PollActivityResult(
 
 	var resp *workflowservice.PollActivityExecutionResponse
 	for resp.GetOutcome() == nil {
+		grpcCtx, cancel := newGRPCContext(ctx, grpcLongPoll(true), grpcTimeout(pollActivityTimeout), defaultGrpcRetryParameters(ctx))
 		var err error
 		resp, err = w.client.WorkflowService().PollActivityExecution(grpcCtx, request)
+		cancel()
 		if err != nil {
 			return nil, err
 		}
