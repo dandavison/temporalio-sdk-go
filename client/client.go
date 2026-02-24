@@ -12,6 +12,7 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	historypb "go.temporal.io/api/history/v1"
 	"go.temporal.io/api/operatorservice/v1"
+	updatepb "go.temporal.io/api/update/v1"
 	"go.temporal.io/api/workflowservice/v1"
 	"io"
 
@@ -1431,6 +1432,32 @@ type (
 		//
 		// NOTE: Experimental
 		CountActivities(ctx context.Context, options CountActivitiesOptions) (*CountActivitiesResult, error)
+
+		// PollActivityExecutionOutcome long-polls for a standalone activity's
+		// outcome, returning the raw gRPC response. Nil-outcome responses and
+		// per-request timeouts are retried internally. The loop terminates when
+		// an outcome is received, the parent context is cancelled, or a
+		// non-timeout gRPC error occurs.
+		//
+		// Unlike ActivityHandle.Get, this method does not convert protos to SDK
+		// types. It is intended for callers that need raw proto payloads and
+		// failure details (e.g. stack traces, source, cause chains).
+		//
+		// NOTE: Experimental
+		PollActivityExecutionOutcome(ctx context.Context, activityID string, runID string) (*workflowservice.PollActivityExecutionResponse, error)
+
+		// PollWorkflowUpdateOutcome long-polls for a workflow update's outcome,
+		// returning the raw gRPC response. Nil-outcome responses and per-request
+		// timeouts are retried internally. The loop terminates when an outcome
+		// is received, the parent context is cancelled, or a non-timeout gRPC
+		// error occurs.
+		//
+		// Unlike WorkflowUpdateHandle.Get, this method does not convert protos
+		// to SDK types. It is intended for callers that need raw proto payloads
+		// and failure details (e.g. stack traces, source, cause chains).
+		//
+		// NOTE: Experimental
+		PollWorkflowUpdateOutcome(ctx context.Context, updateRef *updatepb.UpdateRef) (*workflowservice.PollWorkflowExecutionUpdateResponse, error)
 
 		// WorkflowService provides access to the underlying gRPC service. This should only be used for advanced use cases
 		// that cannot be accomplished via other Client methods. Unlike calls to other Client methods, calls directly to the

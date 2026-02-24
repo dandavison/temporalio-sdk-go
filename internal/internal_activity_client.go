@@ -639,27 +639,70 @@ func (w *workflowClientInterceptor) GetActivityHandle(
 	}
 }
 
+// PollActivityExecutionOutcome long-polls for a standalone activity's outcome,
+// returning the raw gRPC response. It loops internally: nil-outcome responses
+// (the server's long-poll keepalive) and per-request timeouts are retried
+// automatically. The loop terminates when an outcome is received, the parent
+// context is cancelled, or a non-timeout gRPC error occurs.
+//
+// This method does not go through the interceptor chain and does not convert
+// protos to SDK types. It is intended for callers (such as the CLI) that need
+// access to raw proto payloads and failure details.
+//
+// NOTE: Experimental
+func (wc *WorkflowClient) PollActivityExecutionOutcome(
+	ctx context.Context,
+	activityID string,
+	runID string,
+) (*workflowservice.PollActivityExecutionResponse, error) {
+	if err := wc.ensureInitialized(ctx); err != nil {
+		return nil, err
+	}
+	return wc.pollActivityExecutionOutcome(ctx, activityID, runID)
+}
+
+func (wc *WorkflowClient) pollActivityExecutionOutcome(
+	ctx context.Context,
+	activityID string,
+	runID string,
+) (*workflowservice.PollActivityExecutionResponse, error) {
+	request := &workflowservice.PollActivityExecutionRequest{
+		Namespace:  wc.namespace,
+		ActivityId: activityID,
+		RunId:      runID,
+	}
+	for {
+		grpcCtx, cancel := newGRPCContext(ctx,
+			grpcLongPoll(true),
+			grpcTimeout(pollActivityTimeout),
+			defaultGrpcRetryParameters(ctx),
+		)
+		resp, err := wc.WorkflowService().PollActivityExecution(grpcCtx, request)
+		pollTimedOut := grpcCtx.Err() != nil
+		cancel()
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			if pollTimedOut {
+				continue
+			}
+			return nil, err
+		}
+		if resp.GetOutcome() != nil {
+			return resp, nil
+		}
+	}
+}
+
 func (w *workflowClientInterceptor) PollActivityResult(
 	ctx context.Context,
 	in *ClientPollActivityResultInput,
 ) (*ClientPollActivityResultOutput, error) {
-	request := &workflowservice.PollActivityExecutionRequest{
-		Namespace:  w.client.namespace,
-		ActivityId: in.ActivityID,
-		RunId:      in.RunID,
+	resp, err := w.client.pollActivityExecutionOutcome(ctx, in.ActivityID, in.RunID)
+	if err != nil {
+		return nil, err
 	}
-
-	var resp *workflowservice.PollActivityExecutionResponse
-	for resp.GetOutcome() == nil {
-		grpcCtx, cancel := newGRPCContext(ctx, grpcLongPoll(true), grpcTimeout(pollActivityTimeout), defaultGrpcRetryParameters(ctx))
-		var err error
-		resp, err = w.client.WorkflowService().PollActivityExecution(grpcCtx, request)
-		cancel()
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	switch v := resp.GetOutcome().GetValue().(type) {
 	case *activitypb.ActivityExecutionOutcome_Result:
 		return &ClientPollActivityResultOutput{Result: newEncodedValue(v.Result, w.client.dataConverter)}, nil

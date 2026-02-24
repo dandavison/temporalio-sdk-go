@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"go.temporal.io/api/operatorservice/v1"
-
+	updatepb "go.temporal.io/api/update/v1"
 	"go.temporal.io/api/workflowservice/v1"
 )
 
@@ -1197,6 +1197,64 @@ func (_m *Client) CountActivities(ctx context.Context, options client.CountActiv
 
 	if rf, ok := ret.Get(1).(func(context.Context, client.CountActivitiesOptions) error); ok {
 		r1 = rf(ctx, options)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+func (_m *Client) PollActivityExecutionOutcome(ctx context.Context, activityID string, runID string) (*workflowservice.PollActivityExecutionResponse, error) {
+	ret := _m.Called(ctx, activityID, runID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PollActivityExecutionOutcome")
+	}
+
+	var r0 *workflowservice.PollActivityExecutionResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) (*workflowservice.PollActivityExecutionResponse, error)); ok {
+		return rf(ctx, activityID, runID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) *workflowservice.PollActivityExecutionResponse); ok {
+		r0 = rf(ctx, activityID, runID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*workflowservice.PollActivityExecutionResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = rf(ctx, activityID, runID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+func (_m *Client) PollWorkflowUpdateOutcome(ctx context.Context, updateRef *updatepb.UpdateRef) (*workflowservice.PollWorkflowExecutionUpdateResponse, error) {
+	ret := _m.Called(ctx, updateRef)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PollWorkflowUpdateOutcome")
+	}
+
+	var r0 *workflowservice.PollWorkflowExecutionUpdateResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *updatepb.UpdateRef) (*workflowservice.PollWorkflowExecutionUpdateResponse, error)); ok {
+		return rf(ctx, updateRef)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *updatepb.UpdateRef) *workflowservice.PollWorkflowExecutionUpdateResponse); ok {
+		r0 = rf(ctx, updateRef)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*workflowservice.PollWorkflowExecutionUpdateResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *updatepb.UpdateRef) error); ok {
+		r1 = rf(ctx, updateRef)
 	} else {
 		r1 = ret.Error(1)
 	}
