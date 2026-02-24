@@ -2543,58 +2543,91 @@ func (w *workflowClientInterceptor) createUpdateWorkflowRequest(
 	}, nil
 }
 
-func (w *workflowClientInterceptor) PollWorkflowUpdate(
-	parentCtx context.Context,
-	in *ClientPollWorkflowUpdateInput,
-) (*ClientPollWorkflowUpdateOutput, error) {
-	// header, _ = headerPropagated(ctx, w.client.contextPropagators)
-	// todo header not in PollWorkflowUpdate
+// PollWorkflowUpdateOutcome long-polls for a workflow update's outcome,
+// returning the raw gRPC response. It loops internally: nil-outcome responses
+// (the server's long-poll keepalive) and per-request timeouts are retried
+// automatically. The loop terminates when an outcome is received, the parent
+// context is cancelled, or a non-timeout gRPC error occurs.
+//
+// This method does not go through the interceptor chain and does not convert
+// protos to SDK types. It is intended for callers (such as the CLI) that need
+// access to raw proto payloads and failure details.
+//
+// NOTE: Experimental
+func (wc *WorkflowClient) PollWorkflowUpdateOutcome(
+	ctx context.Context,
+	updateRef *updatepb.UpdateRef,
+) (*workflowservice.PollWorkflowExecutionUpdateResponse, error) {
+	if err := wc.ensureInitialized(ctx); err != nil {
+		return nil, err
+	}
+	return wc.pollWorkflowUpdateOutcome(ctx, updateRef)
+}
 
+func (wc *WorkflowClient) pollWorkflowUpdateOutcome(
+	ctx context.Context,
+	updateRef *updatepb.UpdateRef,
+) (*workflowservice.PollWorkflowExecutionUpdateResponse, error) {
 	pollReq := workflowservice.PollWorkflowExecutionUpdateRequest{
-		Namespace: w.client.namespace,
-		UpdateRef: in.UpdateRef,
-		Identity:  w.client.identity,
+		Namespace: wc.namespace,
+		UpdateRef: updateRef,
+		Identity:  wc.identity,
 		WaitPolicy: &updatepb.WaitPolicy{
 			LifecycleStage: enumspb.UPDATE_WORKFLOW_EXECUTION_LIFECYCLE_STAGE_COMPLETED,
 		},
 	}
 	for {
-		ctx, cancel := newGRPCContext(
-			parentCtx,
+		grpcCtx, cancel := newGRPCContext(ctx,
 			grpcLongPoll(true),
 			grpcTimeout(pollUpdateTimeout),
 		)
-		ctx = context.WithValue(
-			ctx,
+		grpcCtx = context.WithValue(grpcCtx,
 			retry.ConfigKey,
-			createDynamicServiceRetryPolicy(ctx).GrpcRetryConfig(),
+			createDynamicServiceRetryPolicy(grpcCtx).GrpcRetryConfig(),
 		)
-		resp, err := w.client.workflowService.PollWorkflowExecutionUpdate(ctx, &pollReq)
+		resp, err := wc.workflowService.PollWorkflowExecutionUpdate(grpcCtx, &pollReq)
+		pollTimedOut := grpcCtx.Err() != nil
 		cancel()
-		if err == nil && resp.GetOutcome() == nil {
-			continue
-		}
 		if err != nil {
 			if ctx.Err() != nil {
-				return nil, NewWorkflowUpdateServiceTimeoutOrCanceledError(err)
+				return nil, ctx.Err()
 			}
-			if code := status.Code(err); code == codes.Canceled || code == codes.DeadlineExceeded {
-				return nil, NewWorkflowUpdateServiceTimeoutOrCanceledError(err)
+			if pollTimedOut {
+				continue
 			}
 			return nil, err
 		}
-		switch v := resp.GetOutcome().GetValue().(type) {
-		case *updatepb.Outcome_Failure:
-			return &ClientPollWorkflowUpdateOutput{
-				Error: w.client.failureConverter.FailureToError(v.Failure),
-			}, nil
-		case *updatepb.Outcome_Success:
-			return &ClientPollWorkflowUpdateOutput{
-				Result: newEncodedValue(v.Success, w.client.dataConverter),
-			}, nil
-		default:
-			return nil, fmt.Errorf("unsupported outcome type %T", v)
+		if resp.GetOutcome() != nil {
+			return resp, nil
 		}
+	}
+}
+
+func (w *workflowClientInterceptor) PollWorkflowUpdate(
+	parentCtx context.Context,
+	in *ClientPollWorkflowUpdateInput,
+) (*ClientPollWorkflowUpdateOutput, error) {
+	resp, err := w.client.pollWorkflowUpdateOutcome(parentCtx, in.UpdateRef)
+	if err != nil {
+		if parentCtx.Err() != nil {
+			return nil, NewWorkflowUpdateServiceTimeoutOrCanceledError(err)
+		}
+		if code := status.Code(err); code == codes.Canceled || code == codes.DeadlineExceeded {
+			return nil, NewWorkflowUpdateServiceTimeoutOrCanceledError(err)
+		}
+		return nil, err
+	}
+	switch v := resp.GetOutcome().GetValue().(type) {
+	case *updatepb.Outcome_Failure:
+		return &ClientPollWorkflowUpdateOutput{
+			Error: w.client.failureConverter.FailureToError(v.Failure),
+		}, nil
+	case *updatepb.Outcome_Success:
+		return &ClientPollWorkflowUpdateOutput{
+			Result: newEncodedValue(v.Success, w.client.dataConverter),
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported outcome type %T", v)
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/operatorservice/v1"
+	updatepb "go.temporal.io/api/update/v1"
 	"go.temporal.io/api/workflowservice/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -479,6 +480,18 @@ type (
 		//
 		// NOTE: Experimental
 		CountActivities(ctx context.Context, options ClientCountActivitiesOptions) (*ClientCountActivitiesResult, error)
+
+		// PollActivityExecutionOutcome long-polls for a standalone activity's
+		// outcome, returning the raw gRPC response.
+		//
+		// NOTE: Experimental
+		PollActivityExecutionOutcome(ctx context.Context, activityID string, runID string) (*workflowservice.PollActivityExecutionResponse, error)
+
+		// PollWorkflowUpdateOutcome long-polls for a workflow update's outcome,
+		// returning the raw gRPC response.
+		//
+		// NOTE: Experimental
+		PollWorkflowUpdateOutcome(ctx context.Context, updateRef *updatepb.UpdateRef) (*workflowservice.PollWorkflowExecutionUpdateResponse, error)
 
 		// WorkflowService provides access to the underlying gRPC service. This should only be used for advanced use cases
 		// that cannot be accomplished via other Client methods. Unlike calls to other Client methods, calls directly to the

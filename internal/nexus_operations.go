@@ -12,6 +12,7 @@ import (
 	failurepb "go.temporal.io/api/failure/v1"
 	nexuspb "go.temporal.io/api/nexus/v1"
 	"go.temporal.io/api/operatorservice/v1"
+	updatepb "go.temporal.io/api/update/v1"
 	"go.temporal.io/api/workflowservice/v1"
 	"google.golang.org/protobuf/encoding/protojson"
 
@@ -720,6 +721,14 @@ func (t *testSuiteClientForNexusOperations) ListActivities(ctx context.Context, 
 }
 
 func (t *testSuiteClientForNexusOperations) CountActivities(ctx context.Context, options ClientCountActivitiesOptions) (*ClientCountActivitiesResult, error) {
+	panic("unimplemented in the test environment")
+}
+
+func (t *testSuiteClientForNexusOperations) PollActivityExecutionOutcome(ctx context.Context, activityID string, runID string) (*workflowservice.PollActivityExecutionResponse, error) {
+	panic("unimplemented in the test environment")
+}
+
+func (t *testSuiteClientForNexusOperations) PollWorkflowUpdateOutcome(ctx context.Context, updateRef *updatepb.UpdateRef) (*workflowservice.PollWorkflowExecutionUpdateResponse, error) {
 	panic("unimplemented in the test environment")
 }
 

@@ -20,8 +20,10 @@ import (
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	activitypb "go.temporal.io/api/activity/v1"
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
+	failurepb "go.temporal.io/api/failure/v1"
 	historypb "go.temporal.io/api/history/v1"
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/api/workflowservice/v1"
@@ -2648,5 +2650,186 @@ func TestUpdate(t *testing.T) {
 		// Verify that calling Get with nil does not panic
 		err = handle.Get(context.TODO(), nil)
 		require.NoError(t, err)
+	})
+}
+
+func TestPollWorkflowUpdateOutcome(t *testing.T) {
+	dc := converter.GetDefaultDataConverter()
+
+	init := func(t *testing.T) (*workflowservicemock.MockWorkflowServiceClient, *WorkflowClient) {
+		svc := workflowservicemock.NewMockWorkflowServiceClient(gomock.NewController(t))
+		client := NewServiceClient(svc, nil, ClientOptions{})
+		svc.EXPECT().
+			GetSystemInfo(gomock.Any(), gomock.Any()).
+			AnyTimes().
+			Return(&workflowservice.GetSystemInfoResponse{}, nil)
+		return svc, client
+	}
+
+	ref := &updatepb.UpdateRef{
+		WorkflowExecution: &commonpb.WorkflowExecution{
+			WorkflowId: "wf-id",
+			RunId:      "run-id",
+		},
+		UpdateId: "update-id",
+	}
+
+	t.Run("success", func(t *testing.T) {
+		svc, client := init(t)
+		payload, _ := dc.ToPayloads("result-value")
+		svc.EXPECT().PollWorkflowExecutionUpdate(gomock.Any(), gomock.Any()).
+			Return(&workflowservice.PollWorkflowExecutionUpdateResponse{
+				Outcome: &updatepb.Outcome{
+					Value: &updatepb.Outcome_Success{Success: payload},
+				},
+				Stage: enumspb.UPDATE_WORKFLOW_EXECUTION_LIFECYCLE_STAGE_COMPLETED,
+			}, nil)
+		resp, err := client.PollWorkflowUpdateOutcome(context.TODO(), ref)
+		require.NoError(t, err)
+		require.NotNil(t, resp.GetOutcome().GetValue().(*updatepb.Outcome_Success))
+	})
+
+	t.Run("failure", func(t *testing.T) {
+		svc, client := init(t)
+		svc.EXPECT().PollWorkflowExecutionUpdate(gomock.Any(), gomock.Any()).
+			Return(&workflowservice.PollWorkflowExecutionUpdateResponse{
+				Outcome: &updatepb.Outcome{
+					Value: &updatepb.Outcome_Failure{
+						Failure: &failurepb.Failure{Message: "update failed"},
+					},
+				},
+			}, nil)
+		resp, err := client.PollWorkflowUpdateOutcome(context.TODO(), ref)
+		require.NoError(t, err)
+		f := resp.GetOutcome().GetValue().(*updatepb.Outcome_Failure)
+		require.Equal(t, "update failed", f.Failure.GetMessage())
+	})
+
+	t.Run("retries on nil outcome", func(t *testing.T) {
+		svc, client := init(t)
+		payload, _ := dc.ToPayloads("delayed-result")
+		gomock.InOrder(
+			svc.EXPECT().PollWorkflowExecutionUpdate(gomock.Any(), gomock.Any()).
+				Return(&workflowservice.PollWorkflowExecutionUpdateResponse{Outcome: nil}, nil),
+			svc.EXPECT().PollWorkflowExecutionUpdate(gomock.Any(), gomock.Any()).
+				Return(&workflowservice.PollWorkflowExecutionUpdateResponse{
+					Outcome: &updatepb.Outcome{
+						Value: &updatepb.Outcome_Success{Success: payload},
+					},
+				}, nil),
+		)
+		resp, err := client.PollWorkflowUpdateOutcome(context.TODO(), ref)
+		require.NoError(t, err)
+		require.NotNil(t, resp.GetOutcome())
+	})
+
+	t.Run("parent context cancelled", func(t *testing.T) {
+		svc, client := init(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		svc.EXPECT().PollWorkflowExecutionUpdate(gomock.Any(), gomock.Any()).
+			DoAndReturn(func(ctx context.Context, _ *workflowservice.PollWorkflowExecutionUpdateRequest, _ ...grpc.CallOption) (*workflowservice.PollWorkflowExecutionUpdateResponse, error) {
+				cancel()
+				return nil, ctx.Err()
+			})
+		_, err := client.PollWorkflowUpdateOutcome(ctx, ref)
+		require.ErrorIs(t, err, context.Canceled)
+	})
+
+	t.Run("gRPC error propagated", func(t *testing.T) {
+		svc, client := init(t)
+		svc.EXPECT().PollWorkflowExecutionUpdate(gomock.Any(), gomock.Any()).
+			Return(nil, fmt.Errorf("server error"))
+		_, err := client.PollWorkflowUpdateOutcome(context.TODO(), ref)
+		require.ErrorContains(t, err, "server error")
+	})
+}
+
+func TestPollActivityExecutionOutcome(t *testing.T) {
+	init := func(t *testing.T) (*workflowservicemock.MockWorkflowServiceClient, *WorkflowClient) {
+		svc := workflowservicemock.NewMockWorkflowServiceClient(gomock.NewController(t))
+		client := NewServiceClient(svc, nil, ClientOptions{})
+		svc.EXPECT().
+			GetSystemInfo(gomock.Any(), gomock.Any()).
+			AnyTimes().
+			Return(&workflowservice.GetSystemInfoResponse{}, nil)
+		return svc, client
+	}
+
+	t.Run("success", func(t *testing.T) {
+		svc, client := init(t)
+		dc := converter.GetDefaultDataConverter()
+		payload, _ := dc.ToPayloads("activity-result")
+		svc.EXPECT().PollActivityExecution(gomock.Any(), gomock.Any()).
+			Return(&workflowservice.PollActivityExecutionResponse{
+				RunId: "run-1",
+				Outcome: &activitypb.ActivityExecutionOutcome{
+					Value: &activitypb.ActivityExecutionOutcome_Result{Result: payload},
+				},
+			}, nil)
+		resp, err := client.PollActivityExecutionOutcome(context.TODO(), "act-1", "run-1")
+		require.NoError(t, err)
+		require.Equal(t, "run-1", resp.GetRunId())
+		require.NotNil(t, resp.GetOutcome().GetValue().(*activitypb.ActivityExecutionOutcome_Result))
+	})
+
+	t.Run("failure", func(t *testing.T) {
+		svc, client := init(t)
+		svc.EXPECT().PollActivityExecution(gomock.Any(), gomock.Any()).
+			Return(&workflowservice.PollActivityExecutionResponse{
+				Outcome: &activitypb.ActivityExecutionOutcome{
+					Value: &activitypb.ActivityExecutionOutcome_Failure{
+						Failure: &failurepb.Failure{
+							Message:    "activity failed",
+							StackTrace: "goroutine 1 ...",
+							Source:     "GoSDK",
+						},
+					},
+				},
+			}, nil)
+		resp, err := client.PollActivityExecutionOutcome(context.TODO(), "act-1", "")
+		require.NoError(t, err)
+		f := resp.GetOutcome().GetValue().(*activitypb.ActivityExecutionOutcome_Failure)
+		require.Equal(t, "activity failed", f.Failure.GetMessage())
+		require.Equal(t, "goroutine 1 ...", f.Failure.GetStackTrace())
+		require.Equal(t, "GoSDK", f.Failure.GetSource())
+	})
+
+	t.Run("retries on nil outcome", func(t *testing.T) {
+		svc, client := init(t)
+		dc := converter.GetDefaultDataConverter()
+		payload, _ := dc.ToPayloads("delayed")
+		gomock.InOrder(
+			svc.EXPECT().PollActivityExecution(gomock.Any(), gomock.Any()).
+				Return(&workflowservice.PollActivityExecutionResponse{Outcome: nil}, nil),
+			svc.EXPECT().PollActivityExecution(gomock.Any(), gomock.Any()).
+				Return(&workflowservice.PollActivityExecutionResponse{
+					Outcome: &activitypb.ActivityExecutionOutcome{
+						Value: &activitypb.ActivityExecutionOutcome_Result{Result: payload},
+					},
+				}, nil),
+		)
+		resp, err := client.PollActivityExecutionOutcome(context.TODO(), "act-1", "")
+		require.NoError(t, err)
+		require.NotNil(t, resp.GetOutcome())
+	})
+
+	t.Run("parent context cancelled", func(t *testing.T) {
+		svc, client := init(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		svc.EXPECT().PollActivityExecution(gomock.Any(), gomock.Any()).
+			DoAndReturn(func(ctx context.Context, _ *workflowservice.PollActivityExecutionRequest, _ ...grpc.CallOption) (*workflowservice.PollActivityExecutionResponse, error) {
+				cancel()
+				return nil, ctx.Err()
+			})
+		_, err := client.PollActivityExecutionOutcome(ctx, "act-1", "")
+		require.ErrorIs(t, err, context.Canceled)
+	})
+
+	t.Run("gRPC error propagated", func(t *testing.T) {
+		svc, client := init(t)
+		svc.EXPECT().PollActivityExecution(gomock.Any(), gomock.Any()).
+			Return(nil, fmt.Errorf("not found"))
+		_, err := client.PollActivityExecutionOutcome(context.TODO(), "act-1", "")
+		require.ErrorContains(t, err, "not found")
 	})
 }
